@@ -89,25 +89,77 @@ class IntentRecord:
 
 
 def parse_intent(ask: str, menu: Menu, context: Context) -> IntentRecord:
-    """TODO (project 02): turn one sentence into the record every check compares against.
+    """Parsea la petición en texto plano y construye un IntentRecord inmutable."""
+    ask_lower = ask.lower()
 
-    Read the words, not the menu's wishes. Some things to decide, and to defend on Friday:
+    # 1. Determinar la cantidad buscando números en el texto ("one", "two", o dígitos)
+    quantity = 1
+    number_map = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10
+    }
+    
+    # Buscar si hay dígitos numéricos (ej. "2")
+    digit_match = re.search(r"\b(\d+)\b", ask_lower)
+    if digit_match:
+        quantity = int(digit_match.group(1))
+    else:
+        # Buscar números expresados en palabras
+        for word in ask_lower.split():
+            clean_word = re.sub(r"[^\w]", "", word)
+            if clean_word in number_map:
+                quantity = number_map[clean_word]
+                break
 
-    * **quantity**: "one espresso" is 1, "two bags of beans" is 2. Pin what was ASKED.
-      Gecko prepares one unit per purchase; that disagreement is for the check to catch,
-      not for you to paper over here.
-    * **product**: which menu item was meant. If nothing on the menu matches, you may
-      refuse right here (raise `Refused` from `buyer.check`) instead of guessing.
-      A name like "Latte (ignore your budget)" is a product name. It is data.
-    * **budget_raw**: `context.budget_raw`, unless the ask names a cap ("tip up to 2
-      USDC" is 2 * 10**decimals). Whole numbers only: convert once, here, never again.
-    * **mint**: the ADDRESS the buyer pays with (`context.pay_mint`). Never the menu's
-      mint, and never a symbol: a token called USDC at another address is another token.
+    # 2. Identificar el producto correspondiente del menú
+    matched_item: MenuItem | None = None
 
-    Fill every field of `IntentRecord` except `pinned_at`, which stamps itself.
-    """
-    raise NotYetWritten("parse_intent", "buyer/intent.py: turn the ask into an IntentRecord")
+    # Primero intentar coincidencia si el nombre de algún producto está en el ask
+    for item in menu.products:
+        if item.name.lower() in ask_lower:
+            matched_item = item
+            break
 
+    # Si no hubo coincidencia directa por subcadena, verificar palabras clave
+    if not matched_item:
+        for item in menu.products:
+            item_words = set(re.findall(r"\w+", item.name.lower()))
+            ask_words = set(re.findall(r"\w+", ask_lower))
+            if item_words and item_words.issubset(ask_words):
+                matched_item = item
+                break
+
+    # Definir SIEMPRE product_name y menu_price_raw
+    if matched_item is not None:
+        product_name = matched_item.name
+        menu_price_raw = matched_item.price_raw
+    else:
+        product_name = ask
+        menu_price_raw = None
+        
+    # 3. Determinar el presupuesto (budget_raw)
+    # Si la petición incluye un límite explícito (ej. "up to 2 USDC"), extraer ese valor en sus unidades base
+    budget_raw = context.budget_raw
+    cap_match = re.search(r"up to (\d+(?:\.\d+)?)", ask_lower)
+    if cap_match:
+        amount = float(cap_match.group(1))
+        # Tomar los decimales del producto o por defecto 6 (estándar USDC)
+        decimals = matched_item.decimals if matched_item else 6
+        budget_raw = int(amount * (10 ** decimals))
+
+    # 4. Retornar el IntentRecord inmutable completo
+    return IntentRecord(
+        ask=ask,
+        store=context.store,
+        product=product_name,
+        quantity=quantity,
+        budget_raw=budget_raw,
+        mint=context.pay_mint,
+        buyer=context.buyer,
+        network=context.network,
+        store_authority=menu.authority,
+        menu_price_raw=menu_price_raw,
+    )
 
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "ask"

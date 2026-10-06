@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from solders.pubkey import Pubkey
 
 from . import letmebuy
 
@@ -101,54 +102,66 @@ def check_store(intent: IntentRecord, prepared: Prepared) -> FieldResult:
 
 
 # --- yours --------------------------------------------------------------------------------
+# --- yours --------------------------------------------------------------------------------
 
 
 def check_product(intent: IntentRecord, prepared: Prepared) -> FieldResult:
-    """TODO: the product in the bytes is the product that was pinned.
-
-    Use case 2 ("one general-admission ticket") must refuse when the prepared purchase is
-    the VIP ticket. Decide how exact "the same product" is, and write it in your ADR.
-    """
-    raise NotYetWritten("check_product", "buyer/check.py: compare prepared.product with the pin")
+    """El producto en la simulación preparada debe ser idéntico al producto en la intención fijada (pin)."""
+    asked = intent.product
+    found = prepared.product
+    if found != asked:
+        return refuse("product", asked, found)
+    return agree("product", asked)
 
 
 def check_price(intent: IntentRecord, prepared: Prepared) -> FieldResult:
-    """TODO: the amount leaving the buyer is at or under the pinned budget.
+    """El precio preparado debe ser un entero válido y no superar el presupuesto fijado."""
+    asked = intent.budget_raw
+    found = prepared.price_raw
 
-    Field name `price_raw`. Whole numbers of the smallest unit on both sides. Use case 4
-    ("tip up to 2 USDC") must refuse a 3 USDC tip and name both numbers. What should
-    happen when the simulation reports no amount at all (`prepared.price_raw is None`)?
-    """
-    raise NotYetWritten("check_price", "buyer/check.py: compare prepared.price_raw with the budget")
+    if found is None:
+        return refuse("price_raw", asked, "none", note="no price was reported by simulation")
+
+    if found > asked:
+        return refuse("price_raw", asked, found)
+
+    return agree("price_raw", found)
 
 
 def check_mint(intent: IntentRecord, prepared: Prepared) -> FieldResult:
-    """TODO: the token paid is the pinned mint, compared as an ADDRESS.
-
-    Use case 3 ("module 3, paid in USDC") must refuse a token called USDC at another
-    address. There is no symbol anywhere in `Prepared`, on purpose.
-    """
-    raise NotYetWritten("check_mint", "buyer/check.py: compare prepared.mint with the pin")
+    """La dirección del token mint preparado debe coincidir exactamente con la fijada."""
+    asked = str(intent.mint)
+    found = str(prepared.mint)
+    if found != asked:
+        return refuse("mint", asked, found)
+    return agree("mint", asked)
 
 
 def check_quantity(intent: IntentRecord, prepared: Prepared) -> FieldResult:
-    """TODO: the number of purchases in the bytes is the number asked for.
-
-    `prepare_purchase` prepares one unit. Use case 5 ("two bags of beans") must refuse:
-    asked 2, prepared 1. Refusing is the honest answer; buying one is not what was asked.
-    """
-    raise NotYetWritten("check_quantity", "buyer/check.py: compare prepared.quantity with the pin")
+    """La cantidad preparada debe ser exactamente igual a la cantidad fijada."""
+    asked = intent.quantity
+    found = prepared.quantity
+    if found != asked:
+        return refuse("quantity", asked, found)
+    return agree("quantity", asked)
 
 
 def check_destination(intent: IntentRecord, prepared: Prepared) -> FieldResult:
-    """TODO: the money goes to the store's own token account for the pinned mint.
+    """La cuenta destino debe ser la Token Account asociada derivada del store_authority y el mint."""
+    # Convertir cadenas de texto a objetos Pubkey
+    owner_pk = Pubkey.from_string(str(intent.store_authority))
+    mint_pk = Pubkey.from_string(str(intent.mint))
 
-    The destination is the associated token account of the authority the menu showed when
-    you pinned (`intent.store_authority`) for the pinned mint. Derive it with
-    `letmebuy.token_account(...)`; never copy it from Gecko's answer.
-    """
-    raise NotYetWritten("check_destination", "buyer/check.py: derive and compare the destination")
-
+    expected = str(
+        letmebuy.token_account(
+            owner=owner_pk,
+            mint=mint_pk,
+        )
+    )
+    found = str(prepared.destination)
+    if found != expected:
+        return refuse("destination", expected, found)
+    return agree("destination", expected)
 
 #: The order is part of the design: cheap, structural checks first.
 CHECKS: tuple[Callable[[IntentRecord, Prepared], FieldResult], ...] = (
